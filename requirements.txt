@@ -1,0 +1,10 @@
+openpyxl
+xlrd
+librosa
+soundfile
+pysoundfile
+fastai
+requests
+beautifulsoup4
+ipywidgets
+requests_html==0.10.0
