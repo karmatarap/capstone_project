@@ -1,0 +1,22 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+openpyxl = "*"
+xlrd = "*"
+librosa = "*"
+fastai = "*"
+requests = "*"
+beautifulsoup4 = "*"
+ipywidgets = "*"
+seaborn = "*"
+requests-html = "==0.10.0"
+SoundFile = "*"
+PySoundFile = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.8"

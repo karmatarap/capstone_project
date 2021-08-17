@@ -87,3 +87,11 @@ target/
 
 # Mypy cache
 .mypy_cache/
+
+# Data folder
+data/raw/*.wav
+data/raw/*.mp3
+data/processed/*.png
+
+# models
+notebooks/models/
