@@ -9,4 +9,5 @@ beautifulsoup4
 ipywidgets
 seaborn
 requests_html==0.10.0
-
+neptune-client
+mlflow

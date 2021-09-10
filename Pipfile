@@ -15,6 +15,9 @@ seaborn = "*"
 requests-html = "==0.10.0"
 SoundFile = "*"
 PySoundFile = "*"
+mlflow = "==1.12.1"
+neptune-mlflow = "==0.2.5"
+neptune-client = "*"
 
 [dev-packages]
 
