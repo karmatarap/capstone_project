@@ -98,3 +98,6 @@ notebooks/models/
 
 # mlflow
 mlruns/
+
+# pipfile
+Pipfile.lock
