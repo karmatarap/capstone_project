@@ -81,11 +81,11 @@ The metrics class with a standard set of metrics has been defined in the utils f
 
 To be able to import this module, we have to append the path to the sys path.
 
-`
+```
 sys.path.append('../utils') # <-- relative path of utils library
 
 from metrics import Metrics
-`
+```
 
 This will be updated based on teams feedback and experimentation with mlflow
 
