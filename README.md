@@ -3,6 +3,7 @@
 ## Directory Structure
 The folder structure follows the best practices suggested by [Data Science Cookiecutter](https://drivendata.github.io/cookiecutter-data-science/).
 
+```
 ├── LICENSE
 ├── Makefile           <- Makefile with commands like `make data` or `make train`
 ├── README.md          <- The top-level README for developers using this project.
@@ -47,6 +48,7 @@ The folder structure follows the best practices suggested by [Data Science Cooki
 │       └── visualize.py
 │
 └── tox.ini            <- tox file with settings for running tox; see tox.readthedocs.io
+```
 
 ## Experiment Tracking
 
