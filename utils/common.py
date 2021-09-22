@@ -29,6 +29,7 @@ def load_dz_data(base_data_dir):
     df_age = df[df['age'] != 'un']
     df_age['agecat'] = df['age'].apply(
         lambda x: 'ad/sa' if x in ('ad','sa') else 'inf/juv')
+    df_age = df_age.reset_index(drop=True)
     return df_age
 
 
