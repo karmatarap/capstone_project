@@ -35,7 +35,7 @@ class TestSplitter:
         if params is not None:
             self._params.update(params)
 
-    def get_no_leakage_trainval_test_splits(self):
+    def get_no_leakage_trainval_test_splits(self, save=True):
         """Split the Dzanga Bai data into training/validation and a test set.
 
         Stratify by STRATIFY_COL and ensure no data leaks by adding rumbles
@@ -43,20 +43,25 @@ class TestSplitter:
 
         Output the indices as separate csvs for training/validation and test.
         """
-        df = common.load_dz_data(self._params['BASE_DATA_DIR'])
+        df = common.load_dz_data(self._params['BASE_DATA_DIR'], target_col=self._params['STRATIFY_COL'])
         stratify_col = self._params['STRATIFY_COL']
         test_size = self._params['TEST_SIZE']
         seed = _DEFAULT_SEED_FOR_TRAIN_TEST_SPLIT
         split_sizes = [1 - test_size, test_size]
+        
+ 
         train_val_indices, test_indices = (
             common.split_and_stratify_without_leakage(
                 df, seed, split_sizes, stratify_col))
-        train_val_indices_filename = os.path.join(
-            self._params['OUTPUT_PATH'], 'train_val_indices.csv')
-        test_indices_filename = os.path.join(
-            self._params['OUTPUT_PATH'], 'test_indices.csv')
-        common.output_csv(train_val_indices_filename, train_val_indices)
-        common.output_csv(test_indices_filename, test_indices)
+    
+        if save:
+            train_val_indices_filename = os.path.join(
+                self._params['OUTPUT_PATH'], 'train_val_indices.csv')
+            test_indices_filename = os.path.join(
+                self._params['OUTPUT_PATH'], 'test_indices.csv')
+            common.output_csv(train_val_indices_filename, train_val_indices)
+            common.output_csv(test_indices_filename, test_indices)
+        return train_val_indices, test_indices
 
 
 if __name__ == '__main__':
