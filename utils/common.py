@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 
-def load_dz_data(base_data_dir):
+def load_dz_data(base_data_dir, target_col ="age"):
     """Load the Dzanga Bai data from the Excel spreadsheet into a dataframe.
 
     Also add the spectrogram path, rumble id, and age category columns.
@@ -26,12 +26,10 @@ def load_dz_data(base_data_dir):
         base_data_dir, 'spectrograms', f'{x}.png'))
     df['exists'] = df['path'].apply(lambda x: os.path.exists(x))
     df['rumble_id'] = df['unique_ID'].apply(lambda x: int(x.split('_')[1]))
-    df_age = df[df['age'] != 'un']
-    df_age['agecat'] = df['age'].apply(
+    df = df[df[target_col] != 'un']
+    df['agecat'] = df['age'].apply(
         lambda x: 'ad/sa' if x in ('ad','sa') else 'inf/juv')
-    df_age = df_age.reset_index(drop=True)
-    return df_age
-
+    return df
 
 def split_and_stratify_without_leakage(df, seed, split_sizes, stratify_col):
     """Split the data, stratifying by the given column.
