@@ -244,34 +244,6 @@ class FastaiModel:
         pass
 
 
-def _sample_age_experiment():
-    """ Example pipeline for experiments """
-    for seed in [100, 200, 300]:
-        for pretrained in ["resnet50", "resnet101", "resnet152"]:
-            # data params to override
-            data_params = {
-                "STRATIFY_COL": "age",
-                "NUM_K_FOLDS": 5,
-                "BASE_DATA_DIR": "./data/metadata",
-                "OUTPUT_PATH": "./data/metadata",
-                "SPECTROGRAM_DIR": "./data/metadata/spectrograms",
-                "SEED": seed,
-            }
-
-            model_params = ModelParams(seed=seed, pretrained=pretrained)
-
-            # model parameters to inherit from data_params
-            model_params.target = data_params["STRATIFY_COL"]
-            model_params.num_folds = data_params["NUM_K_FOLDS"]
-
-            train_df, test_df = create_datasets(data_params)
-
-            model = FastaiModel(
-                model_params=model_params, metadata_path=data_params["OUTPUT_PATH"]
-            )
-            model.train(train_df, test_df, experiment_name="4-class-age")
-
-
 def _sample_experiment(target_col="age", experiment_name="4-class-age"):
     """ Example pipeline for experiments """
     for seed in [100, 200, 300]:
