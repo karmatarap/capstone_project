@@ -28,7 +28,7 @@ class MLFlowTracking(Callback):
             m_idx = list(self.recorder.metric_names[1:]).index(metric_name)
             if len(self.recorder.values) > 0:
                 val = self.recorder.values[-1][m_idx]
-                self.client.log_metric(self.run_id, metric_name, np.float(val))
+                self.client.log_metric(self.run_id, metric_name, np.float64(val))
 
 
 class MLFlowExperiment:
