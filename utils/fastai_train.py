@@ -61,7 +61,7 @@ def fold_gen(output_path: str, nfolds: int) -> Iterator[Tuple[np.array, np.array
 
 
 def create_datasets(data_params: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """[summary]
+    """ Handle the creation of train and test datasets
 
     Returns:
         Train Dataframe, Test Dataframe
@@ -106,7 +106,6 @@ class FastaiModel:
         metadata_path: str = ".",
         model_path: str = ".",
     ) -> None:
-
         self.model_params = model_params
         self.metadata_path = metadata_path
         self.model_path = model_path
