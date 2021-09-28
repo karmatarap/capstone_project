@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import List
 
 import pandas as pd
 from IPython.display import display
@@ -15,21 +16,43 @@ from sklearn.metrics import (
 
 
 class Metrics:
-    """ Helper class to define metrics to capture
-    
-        Can be called directly as:
-        >>> x = [1,2,3,1,2,3,3,3,3,3,3,3,3]
-        >>> z = [3,3,3,3,3,3,3,3,3,3,3,3,3]
-        >>> m = Metrics(x,z)
-        >>> m.score()
-    
-    """
+    """ Helper class to define metrics to capture """
 
-    def __init__(self, targets, preds):
+    def __init__(
+        self, targets: List[int], preds: List[int], labels: List[str] = None
+    ) -> None:
         self.targets = targets
         self.preds = preds
+        self.labels = labels
 
-    def score(self):
+    def plot_confusion_matrix(self) -> None:
+        cm = confusion_matrix(y_true=self.targets, y_pred=self.preds)
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=self.labels)
+        disp.plot()
+
+    def get_metrics_dict(self, prefix: str = "", precision: int = 3) -> dict:
+        """ Returns a dict of useful classification metrics by leveraging
+            sklearns classification_report. Format is massaged for
+            easier logging.
+        """
+        report = classification_report(
+            y_true=self.targets,
+            y_pred=self.preds,
+            target_names=self.labels,
+            output_dict=True,
+        )
+
+        metrics_dict = {}
+        for i, v in report.items():
+            if isinstance(v, dict):
+                for m in v:
+                    metrics_dict[f"{prefix}_{i}_{m}"] = round(v[m], precision)
+            else:
+                metrics_dict[f"{prefix}_{i}"] = round(v, precision)
+        return metrics_dict
+
+    def score(self) -> dict:
+        """ Brief metrics of interest """
         return {
             "Accuracy": round(accuracy_score(self.targets, self.preds), 3),
             "Balanced_Accuracy": round(
@@ -123,26 +146,4 @@ class ExperimentLogger:
     def log_result(self):
         with open(self.experiments_path, mode="a") as f:
             self.results_df.to_csv(f, header=f.tell() == 0, index=False)
-
-
-def plot_confusion_matrix(y_true, y_pred, labels=None):
-
-    cm = confusion_matrix(y_true=y_true, y_pred=y_pred)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
-    disp.plot()
-
-
-def get_metrics_dict(y_true, y_pred, labels=None, prefix=""):
-    report = classification_report(
-        y_true, y_pred, target_names=labels, output_dict=True
-    )
-
-    metrics_dict = {}
-    for i, v in report.items():
-        if isinstance(v, dict):
-            for m in v:
-                metrics_dict[f"{prefix}_{i}_{m}"] = round(v[m], 3)
-        else:
-            metrics_dict[f"{prefix}_{i}"] = round(v, 3)
-    return metrics_dict
 
