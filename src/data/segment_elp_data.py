@@ -32,7 +32,10 @@ def download_file_from_aws(filename):
 def initialize_azure_blob_storage_container_client():
     connection_string = os.getenv('AZURE_CONNECTION_STRING')
     blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-    return blob_service_client.create_container(AZURE_CONTAINER_NAME)
+    try:
+        return blob_service_client.create_container(AZURE_CONTAINER_NAME)
+    except Exception:
+        return blob_service_client.get_container_client(AZURE_CONTAINER_NAME)
 
 
 def upload_to_azure_and_delete_local(container_client, files_to_upload):
