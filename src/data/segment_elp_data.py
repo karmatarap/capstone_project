@@ -57,7 +57,7 @@ def main(argv):
 
     azure_container_client = initialize_azure_blob_storage_container_client()
 
-    metadata_file_path = 'test_metadata.txt'
+    metadata_file_path = '../../data/nn_ele_hb_00-24hr_TrainingSet_v2.txt'
     metadata = MetadataProcessing(metadata_filepath=metadata_file_path).load_metadata()
     metadata_by_filename = MetadataProcessing.split_metadata_into_groups(metadata)
     for filename, cur_metadata in metadata_by_filename.items():
