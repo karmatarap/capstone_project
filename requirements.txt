@@ -11,3 +11,12 @@ seaborn
 requests_html==0.10.0
 neptune-client
 mlflow
+tsfresh
+matplotlib
+datetime
+numpy
+pandas
+sklearn
+xgboost
+boruta
+statistics

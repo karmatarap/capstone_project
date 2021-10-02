@@ -18,6 +18,15 @@ PySoundFile = "*"
 mlflow = "==1.12.1"
 neptune-mlflow = "==0.2.5"
 neptune-client = "*"
+tsfresh = "*"
+matplotlib = "*"
+numpy = "*"
+pandas = "*"
+sklearn = "*"
+xgboost = "*"
+statistics = "*"
+DateTime = "*"
+Boruta = "*"
 
 [dev-packages]
 
