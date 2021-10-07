@@ -60,6 +60,21 @@ def fold_gen(output_path: str, nfolds: int) -> Iterator[Tuple[np.array, np.array
         yield train_indices, val_indices
 
 
+def up_sample(df: pd.DataFrame, target_col: str) -> pd.DataFrame:
+    """ Sample dataframe records with replacement to match max group size"""
+    max_class_size = int(df[target_col].value_counts().max())
+    balanced = pd.concat(
+        [
+            group.sample(max_class_size, replace=True)
+            if len(group) < max_class_size
+            else group
+            for _, group in df.groupby(target_col)
+        ]
+    )
+
+    return balanced
+
+
 def create_datasets(data_params: dict) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """ Handle the creation of train and test datasets
 
@@ -89,11 +104,11 @@ class ModelParams:
 
     target: str = "age"
     library: str = "fastai"
-    epochs: int = 10
+    epochs: int = 20
     batch_size: int = 10
     transforms: Tuple[str] = ("Resize",)
     batch_transforms: Tuple[str] = None
-    patience: int = 3
+    patience: int = 5
     pretrained: str = "resnet50"
     num_folds: int = 5
     seed: int = 100
@@ -115,6 +130,7 @@ class FastaiModel:
         df_train: pd.DataFrame,
         df_test: pd.DataFrame,
         experiment_name: str = "4-class-age",
+        upsample=False,
     ) -> None:
         """ Main training loop 
 
@@ -142,6 +158,9 @@ class FastaiModel:
 
             # Create column to specify if validation set
             df_train["is_valid"] = df_train.index.isin(vl_idx)
+
+            if upsample:
+                df_train = up_sample(df_train, self.model_params.target)
 
             # Define a fastai datablock to ingest data
             spectrogramBlock = DataBlock(
@@ -247,8 +266,8 @@ class FastaiModel:
 def _sample_experiment(target_col="age", experiment_name="4-class-age"):
     """ Example pipeline for experiments """
     for seed in [100, 200, 300]:
-        for pretrained in ["resnet50", "resnet101", "resnet152"]:
-            for folds in [2, 5, 10]:
+        for pretrained in ["resnet50"]:  # , "resnet101", "resnet152"]:
+            for folds in [5]:
                 # data params to override
                 data_params = {
                     "STRATIFY_COL": target_col,
@@ -265,7 +284,7 @@ def _sample_experiment(target_col="age", experiment_name="4-class-age"):
                 model_params.target = data_params["STRATIFY_COL"]
                 model_params.num_folds = data_params["NUM_K_FOLDS"]
                 model_params.seed = data_params["SEED"]
-
+                model_params.transforms = ("Resize", "Upsample")
                 # Model specific parameters
 
                 model_params.pretrained = pretrained
@@ -274,11 +293,13 @@ def _sample_experiment(target_col="age", experiment_name="4-class-age"):
                 model = FastaiModel(
                     model_params=model_params, metadata_path=data_params["OUTPUT_PATH"]
                 )
-                model.train(train_df, test_df, experiment_name=experiment_name)
+                model.train(
+                    train_df, test_df, experiment_name=experiment_name, upsample=True
+                )
 
 
 if __name__ == "__main__":
     # _sample_experiment(target_col="age", experiment_name="4-class-age")
-    # _sample_experiment(target_col="agecat", experiment_name="2-class-age")
-    _sample_experiment(target_col="sex", experiment_name="2-class-sex")
+    _sample_experiment(target_col="agecat", experiment_name="2-class-age")
+    # _sample_experiment(target_col="sex", experiment_name="2-class-sex")
 
