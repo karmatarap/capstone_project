@@ -51,21 +51,21 @@ class Metrics:
                 metrics_dict[f"{prefix}_{i}"] = round(v, precision)
         return metrics_dict
 
-    def score(self) -> dict:
+    def score(self, average_="weighted") -> dict:
         """ Brief metrics of interest """
         return {
             "Accuracy": round(accuracy_score(self.targets, self.preds), 3),
             "Balanced_Accuracy": round(
                 balanced_accuracy_score(self.targets, self.preds), 3
             ),
-            "Weighted_F1": round(
-                f1_score(self.targets, self.preds, average="weighted"), 3
+            f"F1_{average_}": round(
+                f1_score(self.targets, self.preds, average=average_), 3
             ),
-            "Weighted_Precision": round(
-                precision_score(self.targets, self.preds, average="weighted"), 3
+            f"Precision_{average_}": round(
+                precision_score(self.targets, self.preds, average=average_), 3
             ),
-            "Weighted_Recall": round(
-                recall_score(self.targets, self.preds, average="weighted"), 3
+            f"Recall_{average_}": round(
+                recall_score(self.targets, self.preds, average=average_), 3
             ),
         }
 
