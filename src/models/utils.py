@@ -1,7 +1,8 @@
 import os
 import random
 from typing import Tuple
-
+from contextlib import contextmanager
+import neptune.new as neptune
 import numpy as np
 import pandas as pd
 import torch
@@ -35,3 +36,14 @@ def get_test_indices(output_path: str) -> np.array:
     with open(test_indices_filename, "rt") as f:
         test_indices = np.array([int(index) for index in f.readlines()])
     return test_indices
+
+
+@contextmanager
+def log_neptune():
+    run = neptune.init(
+        project=os.getenv("NEPTUNE_PROJECT"), api_token=os.getenv("NEPTUNE_API_TOKEN")
+    )
+    try:
+        yield run
+    finally:
+        run.stop()
