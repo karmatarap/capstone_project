@@ -1,3 +1,5 @@
+import argparse
+import logging
 import math
 import os
 from collections import Counter
@@ -11,24 +13,21 @@ import optuna
 import pandas as pd
 import torch
 import torch.nn as nn
-from audiomentations import (
-    AddGaussianNoise,
-    AddGaussianSNR,
-    Compose,
-    Normalize,
-    PitchShift,
-    SpecFrequencyMask,
-)
 from efficientnet_pytorch import EfficientNet
 from sklearn import preprocessing
 from torch.utils.data import DataLoader, Dataset
 
 from utils.common import load_dz_data
-from utils.cross_validation import CrossValidator
 from utils.metrics import Metrics
 from utils.test_split import TestSplitter
 
-from .config import AudioParams, data_params
+from .config import (
+    AudioParams,
+    best_params,
+    data_params,
+    spec_aug_combos,
+    wav_aug_combos,
+)
 from .dataset import ElephantDataset
 from .engine import Engine
 from .models import get_pretrained_model
@@ -44,8 +43,7 @@ def run_train(
     save_model=False,
     neptune_run=None,
 ) -> float:
-    print(f"FOLD {fold}")
-    print("--------------------------------")
+    logging.info(f"FOLD {fold} ---------------------")
 
     target_col = data_params["STRATIFY_COL"]
     epochs = hyper_params["epochs"]
@@ -112,6 +110,7 @@ def run_train(
 
     # Repeat for each epoch
     min_valid_loss = math.inf
+    max_f1_macro = 0
 
     # Poor mans early stopping, abort training if validation loss does not
     # improve for x successive epochs where x is 10% of total epochs
@@ -126,68 +125,60 @@ def run_train(
 
         train_loss = engine.train_one_epoch(train_dl)
         valid_loss, targets, predictions = engine.validate_one_epoch(valid_dl)
+        m = Metrics(targets, predictions).score(average_="macro")
+        # if epochs % 10 == 0:
 
-        if epochs % 10 == 0:
+        if neptune_run is not None:
             neptune_run[f"train/{fold}/loss"].log(train_loss)
             neptune_run[f"valid/{fold}/loss"].log(valid_loss)
 
-            m = Metrics(targets, predictions).score(average_="macro")
-            neptune_run[f"valid/{fold}/metrics"].log(m)
-            print(
-                f"Fold {fold} ,Training Loss: {train_loss}, Validation Loss: {valid_loss}, F1 Score: {m['F1_macro']}"
-            )
+            for k, v in m:
+                neptune_run[f"valid/{fold}/{k}"].log(v)
+        logging.info(
+            f"Fold {fold} ,Training Loss: {train_loss}, Validation Loss: {valid_loss}, F1 Score: {m['F1_macro']}"
+        )
         if valid_loss < min_valid_loss:
             min_valid_loss = valid_loss
+            max_f1_macro = m["F1_macro"]
             if save_model:
-                print("Saving model.....")
+                logging.info("Saving model.....")
                 torch.save(myModel.state_dict(), f"{fold}-best-model-parameters.pt")
         else:
             early_stopping_counter += 1
         if early_stopping_counter > early_stopping_iter:
             break
-    return min_valid_loss
+    return min_valid_loss, max_f1_macro
 
 
-# Augmentations to be performed directly on the wav files
-# ----------------------------------------------------------------
-# Normalize: Add a constant amount of gain, normalizes the loudness
-# - Should help normalize if elephants are closer or further from detectors
-# PitchShift: Changes pitch without changing tempo
-# - Would an elephant running cause the calls to change in pitch?
-# AddGuassianNoise: Add gaussian noise
-# AddGuassianNoiseSNR: Add gaussian noise with random Signal to Noise Ratio
-# SpecFrequencyMask: Mask a set of frequencies: see Google AI SpecAugment
-
-# try these combos
-# passing mapping as dicts to allow for logging
-wav_aug_combos = {
-    "none": None,
-    "Norm": Normalize(),
-    "Norm-SNR": Compose(
-        [Normalize(), AddGaussianSNR(min_snr_in_db=0.0, max_snr_in_db=60.0)]
-    ),
-    "Norm-Gauss-SNR": Compose(
-        [
-            Normalize(),
-            AddGaussianNoise(),
-            AddGaussianSNR(min_snr_in_db=0.0, max_snr_in_db=60.0),
-        ]
-    ),
-    "Norm-Gauss-SNR-Pitch": Compose(
-        [
-            Normalize(),
-            AddGaussianNoise(),
-            AddGaussianSNR(min_snr_in_db=0.0, max_snr_in_db=60.0),
-            PitchShift(),
-        ]
-    ),
-}
-
-spec_aug_combos = {"none": None, "SpecAug": SpecFrequencyMask()}
+def train_one_model(
+    data_params=data_params,
+    best_params=best_params,
+    wav_params=wav_aug_combos,
+    spec_params=spec_aug_combos,
+    save_model=True,
+    log_neptune=False,
+):
+    all_losses, all_f1 = [], []
+    for f in range(data_params["NUM_K_FOLDS"]):
+        temp_loss, temp_f1 = run_train(
+            f,
+            data_params,
+            best_params,
+            wav_params,
+            spec_params,
+            save_model=save_model,
+            neptune_run=log_neptune,
+        )
+        all_losses.append(temp_loss)
+        all_f1.append(temp_f1)
+    mean_loss = np.mean(all_losses)
+    mean_f1 = np.mean(all_f1)
+    logging.info(f"Mean Min Loss: {mean_loss}, Mean Max F1 macro {mean_f1}")
+    return mean_loss, mean_f1
 
 
 def objective(trial):
-    # Logging to neptune
+    # Objective function for optuna to minimize
     run = neptune.init(
         project=os.getenv("NEPTUNE_PROJECT"), api_token=os.getenv("NEPTUNE_API_TOKEN")
     )
@@ -200,7 +191,6 @@ def objective(trial):
         "spec_augs": trial.suggest_categorical(
             "spec_augs", list(spec_aug_combos.keys())
         ),
-        ""
         "num_layers": trial.suggest_int(
             "num_layer", 0, 7
         ),  # additional layers after pretrained models
@@ -214,41 +204,41 @@ def objective(trial):
     }
 
     run["parameters"] = hyper_params
-    all_losses = []
-    for f in range(data_params["NUM_K_FOLDS"]):
-        temp_loss = run_train(
-            f,
-            data_params,
-            hyper_params,
-            wav_aug_combos,
-            spec_aug_combos,
-            save_model=False,
-            neptune_run=run,
-        )
-        all_losses.append(temp_loss)
-    mean_loss = np.mean(all_losses)
+    mean_loss, mean_f1 = train_one_model(
+        best_params=hyper_params, save_model=False, log_neptune=True
+    )
+
     run["eval/mean_loss"] = mean_loss
+    run["eval/mean_f1"] = mean_f1
     run.stop()
     return mean_loss
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--m",
+        "--mode",
+        choices=["search", "train"],
+        default="train",
+        help="Specify if hyperparameter search should be run, or best_param model should be trained.",
+    )
 
-    # Objective function is to minimize minimum validation loss
-    study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=10)
+    args = parser.parse_args()
+    if args.mode == "search":
+        logging.debug("Hyperparameter search mode")
+        # Objective function is to minimize minimum validation loss
+        study = optuna.create_study(direction="minimize")
+        study.optimize(objective, n_trials=10)
 
-    # Print and save parameters of best model
-    print("best trial:")
-    trial_ = study.best_trial
-    print(trial_.values)
-    print(trial_.params)
-
-    scores = 0
-    for j in range(data_params["NUM_K_FOLDS"]):
-        scr = run_train(
-            j, trial_.params, wav_aug_combos, spec_aug_combos, save_model=True
-        )
-        scores += scr
-    print(scores / data_params["NUM_K_FOLDS"])
+        # Print and save parameters of best model
+        trial_ = study.best_trial
+        logging.info(f"Best trial values: {trial_.values}")
+        logging.info(f"Best trial values: {trial_.params}")
+        _, _ = train_one_model(best_params=trial_.params)
+    else:
+        logging.debug("Training best model from best_params in .config.py")
+        logging.debug(f"Using parameters: {best_params}")
+        _, _ = train_one_model()
 
