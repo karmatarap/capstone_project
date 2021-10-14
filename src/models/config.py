@@ -42,7 +42,7 @@ best_params = {
     "pretrained_model": "efficientnet-b4",
     "wav_augs": "none",
     "spec_augs": "none",
-    "num_layers": 2,
+    "num_layers": 0,
     "hidden_size": 1017,
     "dropout": 0.57,
     "learning_rate": 0.000165,
