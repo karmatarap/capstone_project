@@ -27,3 +27,11 @@ def get_fold(df, fold: int, output_path: str) -> Tuple[pd.DataFrame, pd.DataFram
     df_val = df[df.index.isin(train_indices)].reset_index(drop=True)
 
     return df_train, df_val
+
+
+def get_test_indices(output_path: str) -> np.array:
+    """Helper function to read test indices"""
+    test_indices_filename = os.path.join(output_path, "test_indices.csv")
+    with open(test_indices_filename, "rt") as f:
+        test_indices = np.array([int(index) for index in f.readlines()])
+    return test_indices
