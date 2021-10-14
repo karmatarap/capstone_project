@@ -7,7 +7,7 @@ from typing import Iterable, Iterator, NamedTuple, Tuple
 
 import cv2
 import librosa
-import neptune.new as neptune
+
 import numpy as np
 import optuna
 import pandas as pd
@@ -31,7 +31,7 @@ from .config import (
 from .dataset import ElephantDataset
 from .engine import Engine
 from .models import get_pretrained_model
-from .utils import get_fold, set_seeds
+from .utils import get_fold, set_seeds, log_neptune
 
 
 def run_train(
@@ -41,15 +41,16 @@ def run_train(
     wav_aug_combos: dict,
     spec_aug_combos: dict,
     save_model=False,
-    neptune_run=None,
+    neptune_logger=None,
 ) -> float:
+
     logging.info(f"FOLD {fold} ---------------------")
 
     target_col = data_params["STRATIFY_COL"]
     epochs = hyper_params["epochs"]
     # Load Data
     df = load_dz_data(data_params["BASE_DATA_DIR"], target_col=target_col)
-
+    n_classes = len(set(df[target_col]))
     # Create wav paths
     df["wav_path"] = "./data/raw/" + df["unique_ID"] + ".wav"
     lbl_enc = preprocessing.LabelEncoder()
@@ -87,7 +88,8 @@ def run_train(
         valid_dataset, batch_size=12, shuffle=False, num_workers=4
     )
 
-    myModel = get_pretrained_model(hyper_params)
+    myModel = get_pretrained_model(hyper_params, num_classes=n_classes)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     myModel = myModel.to(device)
 
@@ -122,18 +124,19 @@ def run_train(
     engine = Engine(myModel, optimizer, scheduler, loss_fn, device)
 
     for epoch in range(epochs):
-
+        model_path = f"{fold}-best-model-parameters.pt"
         train_loss = engine.train_one_epoch(train_dl)
         valid_loss, targets, predictions = engine.validate_one_epoch(valid_dl)
         m = Metrics(targets, predictions).score(average_="macro")
         # if epochs % 10 == 0:
 
-        if neptune_run is not None:
-            neptune_run[f"train/{fold}/loss"].log(train_loss)
-            neptune_run[f"valid/{fold}/loss"].log(valid_loss)
+        if neptune_logger is not None:
+            neptune_logger[f"train/{fold}/loss"].log(train_loss)
+            neptune_logger[f"valid/{fold}/loss"].log(valid_loss)
 
-            for k, v in m:
-                neptune_run[f"valid/{fold}/{k}"].log(v)
+            for k, v in m.items():
+                neptune_logger[f"valid/{fold}/{k}"].log(v)
+
         logging.info(
             f"Fold {fold} ,Training Loss: {train_loss}, Validation Loss: {valid_loss}, F1 Score: {m['F1_macro']}"
         )
@@ -142,11 +145,13 @@ def run_train(
             max_f1_macro = m["F1_macro"]
             if save_model:
                 logging.info("Saving model.....")
-                torch.save(myModel.state_dict(), f"{fold}-best-model-parameters.pt")
+                torch.save(myModel.state_dict(), model_path)
+                neptune_logger[f"best_model_params_{fold}"] = model_path
         else:
             early_stopping_counter += 1
         if early_stopping_counter > early_stopping_iter:
             break
+
     return min_valid_loss, max_f1_macro
 
 
@@ -156,7 +161,7 @@ def train_one_model(
     wav_params=wav_aug_combos,
     spec_params=spec_aug_combos,
     save_model=True,
-    log_neptune=False,
+    neptune_logger=None,
 ):
     all_losses, all_f1 = [], []
     for f in range(data_params["NUM_K_FOLDS"]):
@@ -167,7 +172,7 @@ def train_one_model(
             wav_params,
             spec_params,
             save_model=save_model,
-            neptune_run=log_neptune,
+            neptune_logger=neptune_logger,
         )
         all_losses.append(temp_loss)
         all_f1.append(temp_f1)
@@ -179,9 +184,6 @@ def train_one_model(
 
 def objective(trial):
     # Objective function for optuna to minimize
-    run = neptune.init(
-        project=os.getenv("NEPTUNE_PROJECT"), api_token=os.getenv("NEPTUNE_API_TOKEN")
-    )
 
     hyper_params = {
         "pretrained_model": trial.suggest_categorical(
@@ -203,14 +205,15 @@ def objective(trial):
         "batch_size": 12,
     }
 
-    run["parameters"] = hyper_params
-    mean_loss, mean_f1 = train_one_model(
-        best_params=hyper_params, save_model=False, log_neptune=True
-    )
+    with log_neptune() as run:
+        run["parameters"] = hyper_params
+        run["mode"] = "search"
+        mean_loss, mean_f1 = train_one_model(
+            best_params=hyper_params, save_model=False, neptune_logger=run
+        )
 
-    run["eval/mean_loss"] = mean_loss
-    run["eval/mean_f1"] = mean_f1
-    run.stop()
+        run["eval/mean_loss"] = mean_loss
+        run["eval/mean_f1"] = mean_f1
     return mean_loss
 
 
@@ -218,7 +221,6 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--m",
         "--mode",
         choices=["search", "train"],
         default="train",
@@ -226,6 +228,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+
     if args.mode == "search":
         logging.debug("Hyperparameter search mode")
         # Objective function is to minimize minimum validation loss
@@ -236,9 +239,18 @@ if __name__ == "__main__":
         trial_ = study.best_trial
         logging.info(f"Best trial values: {trial_.values}")
         logging.info(f"Best trial values: {trial_.params}")
-        _, _ = train_one_model(best_params=trial_.params)
+        p = trail_.params
     else:
         logging.debug("Training best model from best_params in .config.py")
         logging.debug(f"Using parameters: {best_params}")
-        _, _ = train_one_model()
+        p = best_params
 
+    with log_neptune() as run:
+        run["parameters"] = p
+        run["mode"] = "train"
+        mean_loss, mean_f1 = train_one_model(
+            best_params=p, save_model=True, neptune_logger=run
+        )
+
+        run["eval/mean_loss"] = mean_loss
+        run["eval/mean_f1"] = mean_f1
