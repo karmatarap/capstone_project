@@ -45,7 +45,7 @@ def get_pretrained_model(hyper_params: dict, num_classes: int = 2):
             layers.append(nn.ReLU())
         layers.append(nn.Linear(hyper_params["hidden_size"], num_classes))
 
-        if "efficientnet" in "name":
+        if "efficientnet" in model_name:
             model._fc = nn.Sequential(*layers)
         else:
             model.fc = nn.Sequential(*layers)
