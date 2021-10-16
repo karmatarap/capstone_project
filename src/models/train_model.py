@@ -146,10 +146,11 @@ def run_train(
             if save_model:
                 logging.info("Saving model.....")
                 torch.save(myModel.state_dict(), model_path)
-                neptune_logger[f"best_model_params_{fold}"] = model_path
+                neptune_logger[f"best_model_params_{fold}"].track_files(model_path)
         else:
             early_stopping_counter += 1
         if early_stopping_counter > early_stopping_iter:
+            logging.info(f"Early stopping after {early_stopping_counter} iterations")
             break
 
     return min_valid_loss, max_f1_macro
