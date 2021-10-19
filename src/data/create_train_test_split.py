@@ -4,7 +4,7 @@ if __name__ == "__main__":
     PARAMS = {
         "BASE_DATA_DIR": "./data/metadata",
         "NUM_K_FOLDS": 5,
-        "SEED": 100,
+        "SEED": 42,
         "STRATIFY_COL": "agecat",
         "OUTPUT_PATH": "./data/metadata",
     }
