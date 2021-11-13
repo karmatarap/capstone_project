@@ -33,7 +33,6 @@ data_params = {
     "BASE_DATA_DIR": "./data/metadata",
     "OUTPUT_PATH": "./data/metadata",
     "SPECTROGRAM_DIR": "./data/metadata/spectrograms",
-    "SEED": 42,
 }
 
 # Placeholder to import best hyperparameters
@@ -46,7 +45,6 @@ best_params = {
     "hidden_size": 1017,
     "dropout": 0.57,
     "learning_rate": 0.000165,
-    "seed": 42,
     "target": "agecat",
     "epochs": 50,
     "batch_size": 12,
@@ -68,6 +66,8 @@ best_params = {
 wav_aug_combos = {
     "none": None,
     "Norm": Normalize(),
+    "SNR": AddGaussianSNR(min_snr_in_db=0.0, max_snr_in_db=60.0),
+    "SNR-Pitch": PitchShift(),
     "Norm-SNR": Compose(
         [Normalize(), AddGaussianSNR(min_snr_in_db=0.0, max_snr_in_db=60.0)]
     ),

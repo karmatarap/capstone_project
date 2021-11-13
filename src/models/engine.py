@@ -35,7 +35,7 @@ class Engine:
         loss = self.loss_fn(outputs, labels)
         outputs = torch.argmax(outputs, axis=1)
         return (
-            loss.detach().cpu(),
+            loss.detach().cpu().numpy().tolist(),
             labels.detach().cpu().numpy().tolist(),
             outputs.detach().cpu().numpy().tolist(),
         )
