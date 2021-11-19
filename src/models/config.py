@@ -30,6 +30,7 @@ class AudioParams:
 data_params = {
     "STRATIFY_COL": "agecat",
     "NUM_K_FOLDS": 5,
+    "VAL_SIZE": 0.2,
     "BASE_DATA_DIR": "./data/metadata",
     "OUTPUT_PATH": "./data/metadata",
     "SPECTROGRAM_DIR": "./data/metadata/spectrograms",
@@ -41,6 +42,8 @@ best_params = {
     "pretrained_model": "efficientnet-b4",
     "wav_augs": "none",
     "spec_augs": "none",
+    "wav_augs_eval": "none",
+    "spec_augs_eval": "none",
     "num_layers": 0,
     "hidden_size": 1017,
     "dropout": 0.57,

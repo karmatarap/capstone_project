@@ -59,7 +59,7 @@ def run_train(
     # Split train/val/test
     TestSplitter(data_params).get_no_leakage_trainval_test_splits()
     df_train, df_valid, df_test = split_train_val_test(
-        df, target_col, seed, data_params["OUTPUT_PATH"]
+        df, data_params
     )
 
     print(set(df_train[target_col]))
@@ -208,6 +208,7 @@ def train_one_model(
     # Averaging runs over 5 seeds
     for seed in range(100, 600, 100):
         data_params["SEED"] = seed
+        data_params["TRAIN_TEST_SPLIT_SEED"] = seed
         temp_loss, temp_f1, temp_test_f1 = run_train(
             data_params,
             best_params,
@@ -305,9 +306,10 @@ if __name__ == "__main__":
     with log_neptune() as run:
         run["parameters"] = p
         run["mode"] = "train"
-        mean_loss, mean_f1 = train_one_model(
-            best_params=p, save_model=True, neptune_logger=run
+        mean_loss, mean_f1, mean_test_f1 = train_one_model(
+            best_params=p, save_model=False, neptune_logger=run
         )
 
         run["eval/mean_loss"] = mean_loss
         run["eval/mean_f1"] = mean_f1
+        run["test/mean_f1"] = mean_test_f1

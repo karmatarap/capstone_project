@@ -22,6 +22,9 @@ _DEFAULT_PARAMS = {
     'BASE_DATA_DIR': 'dzanga-bai-20210816T230919Z-001/dzanga-bai',
     'BASE_ELP_WAV_DATA_DIR': 'elp_data/wav_files',
     'NUM_K_FOLDS': 5,
+    # Takes precedence over NUM_K_FOLDS, creating 1 fold with train as
+    # 1-VAL_SIZE and val as VAL_SIZE.
+    'VAL_SIZE': None,
     'SEED': 100,
     # Stratify by the 4 category age column to make it more even.
     'STRATIFY_COL': 'age',
@@ -54,7 +57,7 @@ class CrossValidator:
             self._params.update(params)
 
 
-    def get_no_leakage_crossval_splits(self, train_val_indices):
+    def get_no_leakage_crossval_splits(self, train_val_indices, save=True):
         """Split the Dzanga Bai data into cross validation folds.
 
         Stratify by STRATIFY_COL and ensure no data leaks by adding rumbles
@@ -64,19 +67,29 @@ class CrossValidator:
         fold.
         """
         df = common.load_dz_data(self._params['BASE_DATA_DIR'])
-        num_folds = self._params['NUM_K_FOLDS']
+        stratify_col = self._params['STRATIFY_COL']
         train_val_df = df.iloc[train_val_indices]
+        val_size = self._params['VAL_SIZE']
+        if val_size is not None:
+            num_folds = 1
+            # First is val, second is train.
+            split_sizes  = [
+                len(train_val_indices) * val_size,
+                len(train_val_indices) * (1 - val_size)
+            ]
+        else:
+            num_folds = self._params['NUM_K_FOLDS']
+            split_sizes = [len(train_val_indices) / num_folds] * num_folds
 
         # Split the train/val set into NUM_K_FOLDS different folds with a seed
         # that can change between runs to get different cross validation
         # splits for different trials.
-        stratify_col = self._params['STRATIFY_COL']
-        split_sizes = [len(train_val_indices) / num_folds] * num_folds
         split_indices = common.split_and_stratify_without_leakage(
             train_val_df, self._params['SEED'], split_sizes, stratify_col)
         # Test indices are assumed to be all other indices.
         test_indices = set(range(len(df))) - set(train_val_indices)
-        for i in range(len(split_indices)):
+        cross_val_indices = []
+        for i in range(num_folds):
             # Train is all splits except the current split.
             # Validation is the current split.
             # These indices are relative to the train_val_df.
@@ -97,12 +110,16 @@ class CrossValidator:
             # and test.
             assert(len(set(train_idx) | set(val_idx) | test_indices)
                 == len(train_idx) + len(val_idx) + len(test_indices))
-            train_indices_filename = os.path.join(
-                self._params['OUTPUT_PATH'], f'train_indices_{i}.csv')
-            val_indices_filename = os.path.join(
-                self._params['OUTPUT_PATH'], f'val_indices_{i}.csv')
-            common.output_csv(train_indices_filename, train_idx)
-            common.output_csv(val_indices_filename, val_idx)
+            if save:
+                train_indices_filename = os.path.join(
+                    self._params['OUTPUT_PATH'], f'train_indices_{i}.csv')
+                val_indices_filename = os.path.join(
+                    self._params['OUTPUT_PATH'], f'val_indices_{i}.csv')
+                common.output_csv(train_indices_filename, train_idx)
+                common.output_csv(val_indices_filename, val_idx)
+            cross_val_indices.append((train_idx, val_idx))
+        return cross_val_indices
+
 
 
     def get_no_leakage_crossval_elp_splits(self):
@@ -128,5 +145,5 @@ if __name__ == '__main__':
         _DEFAULT_PARAMS['OUTPUT_PATH'], 'train_val_indices.csv')
     with open(train_val_indices_filename, 'rt') as f:
         train_val_indices = np.array([int(index) for index in f.readlines()])
-    # CrossValidator().get_no_leakage_crossval_splits(train_val_indices)
-    CrossValidator().get_no_leakage_crossval_elp_splits()
+    CrossValidator({'VAL_SIZE': 0.2}).get_no_leakage_crossval_splits(train_val_indices)
+    # CrossValidator().get_no_leakage_crossval_elp_splits()

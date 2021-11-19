@@ -5,10 +5,6 @@ Author: Lucy Tan
 import os
 from utils import common
 
-# Seed for splitting the dataset into train/val and test. It should be
-# hardcoded to ensure the test set is always the same.
-_DEFAULT_SEED_FOR_TRAIN_TEST_SPLIT = 22
-
 
 # Default parameters to use for test splitting if none are provided.
 _DEFAULT_PARAMS = {
@@ -16,7 +12,8 @@ _DEFAULT_PARAMS = {
     # Stratify by the 4 category age column to make it more even.
     'STRATIFY_COL': 'age',
     'TEST_SIZE': 0.2,
-    'OUTPUT_PATH': 'dzanga-bai-20210816T230919Z-001/dzanga-bai'
+    'OUTPUT_PATH': 'dzanga-bai-20210816T230919Z-001/dzanga-bai',
+    'TRAIN_TEST_SPLIT_SEED': 22
 }
 
 
@@ -43,10 +40,10 @@ class TestSplitter:
 
         Output the indices as separate csvs for training/validation and test.
         """
-        df = common.load_dz_data(self._params['BASE_DATA_DIR'], target_col=self._params['STRATIFY_COL'])
+        df = common.load_dz_data(self._params['BASE_DATA_DIR'])
         stratify_col = self._params['STRATIFY_COL']
         test_size = self._params['TEST_SIZE']
-        seed = _DEFAULT_SEED_FOR_TRAIN_TEST_SPLIT
+        seed = self._params['TRAIN_TEST_SPLIT_SEED']
         split_sizes = [1 - test_size, test_size]
         
  

@@ -6,7 +6,8 @@ import neptune.new as neptune
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.model_selection import train_test_split
+
+from utils.cross_validation import CrossValidator
 
 
 def set_seeds(seed: int) -> None:
@@ -47,19 +48,14 @@ def get_test_indices(output_path: str) -> np.array:
     return test_indices
 
 
-def split_train_val_test(df, stratify_col, seed, output_path):
-    test_indices = get_test_indices(output_path)
+def split_train_val_test(df, data_params):
+    test_indices = get_test_indices(data_params['OUTPUT_PATH'])
     df_test = df[df.index.isin(test_indices)].reset_index(drop=True)
-    train_val_indices = get_train_val_indices(output_path)
-    df_train_val = df[df.index.isin(train_val_indices)].reset_index(drop=True)
-    df_train, df_val, _, _ = train_test_split(
-        df,
-        df[stratify_col],
-        test_size=0.2,
-        random_state=seed,
-        stratify=df[stratify_col],
-    )
-    return df_train.reset_index(drop=True), df_val.reset_index(drop=True), df_test
+    train_val_indices = get_train_val_indices(data_params['OUTPUT_PATH'])
+    cross_val_indices = CrossValidator(data_params).get_no_leakage_crossval_splits(train_val_indices)
+    df_train = df[df.index.isin(cross_val_indices[0][0])].reset_index(drop=True)
+    df_val = df[df.index.isin(cross_val_indices[0][1])].reset_index(drop=True)
+    return df_train, df_val, df_test
 
 
 @contextmanager
