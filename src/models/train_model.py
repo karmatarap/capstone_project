@@ -32,7 +32,7 @@ from .config import (
 from .dataset import ElephantDataset
 from .engine import Engine
 from .models import get_pretrained_model
-from .utils import split_train_val_test, log_neptune, set_seeds
+from .utils import get_test_indices, split_train_val_test, log_neptune, set_seeds
 
 
 def run_train(
@@ -46,31 +46,33 @@ def run_train(
 
     seed = data_params["SEED"]
     logging.info(f"SEED {seed} ---------------------")
+
+    # Set seed for all random settings
     set_seeds(seed)
+
     target_col = data_params["STRATIFY_COL"]
     epochs = hyper_params["epochs"]
+
     # Load Data
     df = load_dz_data(data_params["BASE_DATA_DIR"])
     n_classes = len(set(df[target_col]))
+
     # Create wav paths
     df["wav_path"] = "./data/wavs/" + df["unique_ID"] + ".wav"
     lbl_enc = preprocessing.LabelEncoder()
 
     # Split train/val/test
-    TestSplitter(data_params).get_no_leakage_trainval_test_splits()
-    df_train, df_valid, df_test = split_train_val_test(
-        df, data_params
-    )
+    df_train, df_valid, df_test = split_train_val_test(df, data_params)
 
-    print(set(df_train[target_col]))
-    print(set(df_valid[target_col]))
-    print(set(df_test[target_col]))
     logging.info(
         f"Train: {len(df_train)}, Valid: {len(df_valid)}, Test: {len(df_test)}"
     )
+
     # Encode target
     train_targets = lbl_enc.fit_transform(df_train[target_col])
     labels = list(sorted(set(df_train[target_col])))
+
+    # Audio / spec parameters for training set
     wav_augs = wav_aug_combos[hyper_params["wav_augs"]]
     spec_augs = spec_aug_combos[hyper_params["spec_augs"]]
     params = AudioParams()
@@ -83,9 +85,10 @@ def run_train(
         spec_augmentations=spec_augs,
     )
     train_dl = torch.utils.data.DataLoader(
-        train_dataset, batch_size=14, num_workers=4, pin_memory=True
+        train_dataset, batch_size=14, num_workers=4, drop_last=True
     )
 
+    # Validation set settings
     wav_augs_eval = wav_aug_combos[hyper_params["wav_augs_eval"]]
     spec_augs_eval = spec_aug_combos[hyper_params["spec_augs_eval"]]
     valid_targets = lbl_enc.fit_transform(df_valid[target_col])
@@ -97,7 +100,7 @@ def run_train(
         spec_augmentations=spec_augs_eval,
     )
     valid_dl = torch.utils.data.DataLoader(
-        valid_dataset, batch_size=14, shuffle=False, num_workers=4, pin_memory=True
+        valid_dataset, batch_size=14, shuffle=False, num_workers=4, drop_last=True
     )
 
     test_targets = lbl_enc.fit_transform(df_test[target_col])
@@ -109,7 +112,7 @@ def run_train(
         spec_augmentations=spec_augs_eval,
     )
     test_dl = torch.utils.data.DataLoader(
-        test_dataset, batch_size=14, shuffle=False, num_workers=4, pin_memory=True
+        test_dataset, batch_size=14, shuffle=False, num_workers=4, drop_last=True
     )
 
     myModel = get_pretrained_model(hyper_params, num_classes=n_classes)
@@ -136,7 +139,6 @@ def run_train(
 
     # Repeat for each epoch
     min_valid_loss = math.inf
-    max_f1_macro = 0
 
     # Poor mans early stopping, abort training if validation loss does not
     # improve for x successive epochs where x is 10% of total epochs
@@ -146,34 +148,34 @@ def run_train(
     engine = Engine(myModel, optimizer, scheduler, loss_fn, device)
 
     for epoch in range(epochs):
+
         model_path = f"{seed}-best-model-parameters.pt"
         train_loss = engine.train_one_epoch(train_dl)
+
         valid_loss, val_targs, val_preds = engine.validate_one_epoch(valid_dl)
+
         valid_metrics = Metrics(val_targs, val_preds, labels=labels).get_metrics_dict(
             prefix="val"
         )
         test_loss, test_targs, test_preds = engine.validate_one_epoch(test_dl)
+
         test_metrics = Metrics(test_targs, test_preds, labels=labels).get_metrics_dict(
             prefix="test"
         )
 
-        print(val_targs)
-        print(val_preds)
-        print(test_targs)
-        print(test_preds)
         if neptune_logger is not None:
-            neptune_logger[f"train/{seed}/loss"].log(train_loss)
-            neptune_logger[f"valid/{seed}/loss"].log(valid_loss)
-            neptune_logger[f"test/{seed}/loss"].log(test_loss)
+            neptune_logger[f"train/loss"].log(train_loss)
+            neptune_logger[f"valid/loss"].log(valid_loss)
+            neptune_logger[f"test/loss"].log(test_loss)
 
             for k, v in valid_metrics.items():
-                neptune_logger[f"valid/{seed}/{k}"].log(v)
+                neptune_logger[f"valid/{k}"].log(v)
 
             for k, v in test_metrics.items():
-                neptune_logger[f"test/{seed}/{k}"].log(v)
+                neptune_logger[f"test/{k}"].log(v)
 
         logging.info(
-            f"Seed: {seed} ,Training Loss: {train_loss}, Validation Loss: {valid_loss} \nValid F1: {valid_metrics['val_macro avg_f1-score']} Test F1: {test_metrics['test_macro avg_f1-score']}"
+            f"Epoch: {epoch} ,Training Loss: {train_loss}, Validation Loss: {valid_loss} \nValid F1: {valid_metrics['val_macro avg_f1-score']} Test F1: {test_metrics['test_macro avg_f1-score']}"
         )
         if valid_loss < min_valid_loss:
             min_valid_loss = valid_loss
@@ -194,47 +196,12 @@ def run_train(
     return min_valid_loss, max_valid_f1, max_test_f1
 
 
-def train_one_model(
-    data_params=data_params,
-    best_params=best_params,
-    wav_params=wav_aug_combos,
-    spec_params=spec_aug_combos,
-    save_model=True,
-    neptune_logger=None,
-):
-
-    val_losses, val_f1, test_f1 = [], [], []
-
-    # Averaging runs over 5 seeds
-    for seed in range(100, 600, 100):
-        data_params["SEED"] = seed
-        data_params["TRAIN_TEST_SPLIT_SEED"] = seed
-        temp_loss, temp_f1, temp_test_f1 = run_train(
-            data_params,
-            best_params,
-            wav_params,
-            spec_params,
-            save_model=save_model,
-            neptune_logger=neptune_logger,
-        )
-        val_losses.append(temp_loss)
-        val_f1.append(temp_f1)
-        test_f1.append(temp_test_f1)
-    mean_loss = np.mean(val_losses)
-    mean_val_f1 = np.mean(val_f1)
-    mean_test_f1 = np.mean(test_f1)
-    logging.info(
-        f"Mean Min Loss: {mean_loss}, Mean Max F1 macro {mean_val_f1}, Mean Max Test F1 {mean_test_f1}"
-    )
-    return mean_loss, mean_val_f1, mean_test_f1
-
-
 def objective(trial):
     # Objective function for optuna to minimize
 
     hyper_params = {
         "pretrained_model": trial.suggest_categorical(
-            "pretrained_model", ["resnext50_32x4d", "resnet50", "efficientnet-b4"]
+            "pretrained_model", ["resnext50_32x4d", "resnet50", "efficientnet-b3"]
         ),
         "wav_augs": trial.suggest_categorical("wav_augs", list(wav_aug_combos.keys())),
         "spec_augs": trial.suggest_categorical(
@@ -260,15 +227,20 @@ def objective(trial):
     with log_neptune() as run:
         run["parameters"] = hyper_params
         run["mode"] = "search"
-        mean_loss, mean_f1, mean_test_f1 = train_one_model(
-            best_params=hyper_params, save_model=False, neptune_logger=run
+        min_valid_loss, max_valid_f1, max_test_f1 = run_train(
+            data_params=data_params,
+            hyper_params=hyper_params,
+            wav_aug_combos=wav_aug_combos,
+            spec_aug_combos=spec_aug_combos,
+            save_model=False,
+            neptune_logger=run,
         )
 
-        run["eval/mean_loss"] = mean_loss
-        run["eval/mean_f1"] = mean_f1
-        run["test/mean_f1"] = mean_test_f1
+        run["eval/min_loss"] = min_valid_loss
+        run["eval/max_f1"] = max_valid_f1
+        run["test/max_f1"] = max_test_f1
 
-    return mean_loss
+    return min_valid_loss
 
 
 if __name__ == "__main__":
@@ -284,32 +256,41 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.mode == "search":
+        # Creating one model per seed and tuning it
+        for seed in range(100, 400, 100):
+            data_params["SEED"] = seed
+            data_params["TRAIN_TEST_SPLIT_SEED"] = seed
 
-        # CrossValidator(
-        #    data_params).get_no_leakage_crossval_splits(train_val_indices)
+            # Create train/test split files
+            TestSplitter(data_params).get_no_leakage_trainval_test_splits()
 
-        logging.debug("Hyperparameter search mode")
-        # Objective function is to minimize minimum validation loss
-        study = optuna.create_study(direction="minimize")
-        study.optimize(objective, n_trials=100)
+            logging.debug("Hyperparameter search mode")
+            # Objective function is to minimize minimum validation loss
+            study = optuna.create_study(direction="minimize")
+            study.optimize(objective, n_trials=100)
 
-        # Print and save parameters of best model
-        trial_ = study.best_trial
-        logging.info(f"Best trial values: {trial_.values}")
-        logging.info(f"Best trial values: {trial_.params}")
-        p = trial_.params
+            # Print and save parameters of best model
+            trial_ = study.best_trial
+            logging.info(f"Best trial values: {trial_.values}")
+            logging.info(f"Best trial values: {trial_.params}")
+            p = trial_.params
     else:
         logging.debug("Training best model from best_params in .config.py")
         logging.debug(f"Using parameters: {best_params}")
         p = best_params
 
-    with log_neptune() as run:
-        run["parameters"] = p
-        run["mode"] = "train"
-        mean_loss, mean_f1, mean_test_f1 = train_one_model(
-            best_params=p, save_model=False, neptune_logger=run
-        )
+        with log_neptune() as run:
+            run["parameters"] = best_params
+            run["mode"] = "train"
+            min_valid_loss, max_valid_f1, max_test_f1 = run_train(
+                data_params=data_params,
+                hyper_params=best_params,
+                wav_aug_combos=wav_aug_combos,
+                spec_aug_combos=spec_aug_combos,
+                save_model=True,
+                neptune_logger=run,
+            )
 
-        run["eval/mean_loss"] = mean_loss
-        run["eval/mean_f1"] = mean_f1
-        run["test/mean_f1"] = mean_test_f1
+            run["eval/min_loss"] = min_valid_loss
+            run["eval/max_f1"] = max_valid_f1
+            run["test/max_f1"] = max_test_f1

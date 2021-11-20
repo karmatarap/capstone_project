@@ -30,7 +30,7 @@ class AudioParams:
 data_params = {
     "STRATIFY_COL": "agecat",
     "NUM_K_FOLDS": 5,
-    "VAL_SIZE": 0.2,
+    "VAL_SIZE": 0.25,
     "BASE_DATA_DIR": "./data/metadata",
     "OUTPUT_PATH": "./data/metadata",
     "SPECTROGRAM_DIR": "./data/metadata/spectrograms",
