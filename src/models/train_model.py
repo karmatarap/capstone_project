@@ -49,7 +49,7 @@ def run_train(
 
     # Set seed for all random settings
     set_seeds(seed)
-
+    bs = hyper_params["batch_size"]
     target_col = data_params["STRATIFY_COL"]
     epochs = hyper_params["epochs"]
 
@@ -84,9 +84,7 @@ def run_train(
         wav_augmentations=wav_augs,
         spec_augmentations=spec_augs,
     )
-    train_dl = torch.utils.data.DataLoader(
-        train_dataset, batch_size=14, num_workers=4, drop_last=True
-    )
+    train_dl = torch.utils.data.DataLoader(train_dataset, batch_size=bs, num_workers=4)
 
     # Validation set settings
     wav_augs_eval = wav_aug_combos[hyper_params["wav_augs_eval"]]
@@ -100,7 +98,7 @@ def run_train(
         spec_augmentations=spec_augs_eval,
     )
     valid_dl = torch.utils.data.DataLoader(
-        valid_dataset, batch_size=14, shuffle=False, num_workers=4, drop_last=True
+        valid_dataset, batch_size=bs, shuffle=False, num_workers=4
     )
 
     test_targets = lbl_enc.fit_transform(df_test[target_col])
@@ -112,7 +110,7 @@ def run_train(
         spec_augmentations=spec_augs_eval,
     )
     test_dl = torch.utils.data.DataLoader(
-        test_dataset, batch_size=14, shuffle=False, num_workers=4, drop_last=True
+        test_dataset, batch_size=bs, shuffle=False, num_workers=4
     )
 
     myModel = get_pretrained_model(hyper_params, num_classes=n_classes)
@@ -221,7 +219,7 @@ def objective(trial):
         "learning_rate": trial.suggest_loguniform("learning_rate", 1e-6, 1e-2),
         # "target": data_params["STRATIFY_COL"],
         "epochs": 50,
-        "batch_size": 14,
+        "batch_size": 12,
     }
 
     with log_neptune() as run:
