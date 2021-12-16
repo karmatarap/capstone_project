@@ -32,7 +32,7 @@ from .config import (
 from .dataset import ElephantDataset
 from .engine import Engine
 from .models import get_pretrained_model
-from .utils import get_test_indices, split_train_val_test, log_neptune, set_seeds
+from .utils import split_train_val_test, log_neptune, set_seeds, seed_worker
 
 
 def run_train(
@@ -41,38 +41,35 @@ def run_train(
     wav_aug_combos: dict,
     spec_aug_combos: dict,
     save_model=False,
-    neptune_logger=None,
 ) -> float:
+
+    # For reproducibility
+    g = torch.Generator()
+    g.manual_seed(0)
 
     seed = data_params["SEED"]
     logging.info(f"SEED {seed} ---------------------")
-
-    # Set seed for all random settings
     set_seeds(seed)
-    bs = hyper_params["batch_size"]
     target_col = data_params["STRATIFY_COL"]
     epochs = hyper_params["epochs"]
-
     # Load Data
     df = load_dz_data(data_params["BASE_DATA_DIR"])
     n_classes = len(set(df[target_col]))
-
     # Create wav paths
     df["wav_path"] = "./data/wavs/" + df["unique_ID"] + ".wav"
     lbl_enc = preprocessing.LabelEncoder()
 
     # Split train/val/test
+    TestSplitter(data_params).get_no_leakage_trainval_test_splits()
+
     df_train, df_valid, df_test = split_train_val_test(df, data_params)
 
     logging.info(
         f"Train: {len(df_train)}, Valid: {len(df_valid)}, Test: {len(df_test)}"
     )
-
     # Encode target
     train_targets = lbl_enc.fit_transform(df_train[target_col])
     labels = list(sorted(set(df_train[target_col])))
-
-    # Audio / spec parameters for training set
     wav_augs = wav_aug_combos[hyper_params["wav_augs"]]
     spec_augs = spec_aug_combos[hyper_params["spec_augs"]]
     params = AudioParams()
@@ -84,9 +81,15 @@ def run_train(
         wav_augmentations=wav_augs,
         spec_augmentations=spec_augs,
     )
-    train_dl = torch.utils.data.DataLoader(train_dataset, batch_size=bs, num_workers=4)
+    train_dl = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=14,
+        num_workers=4,
+        pin_memory=True,
+        worker_init_fn=seed_worker,
+        generator=g,
+    )
 
-    # Validation set settings
     wav_augs_eval = wav_aug_combos[hyper_params["wav_augs_eval"]]
     spec_augs_eval = spec_aug_combos[hyper_params["spec_augs_eval"]]
     valid_targets = lbl_enc.fit_transform(df_valid[target_col])
@@ -98,7 +101,13 @@ def run_train(
         spec_augmentations=spec_augs_eval,
     )
     valid_dl = torch.utils.data.DataLoader(
-        valid_dataset, batch_size=bs, shuffle=False, num_workers=4
+        valid_dataset,
+        batch_size=14,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True,
+        worker_init_fn=seed_worker,
+        generator=g,
     )
 
     test_targets = lbl_enc.fit_transform(df_test[target_col])
@@ -110,7 +119,13 @@ def run_train(
         spec_augmentations=spec_augs_eval,
     )
     test_dl = torch.utils.data.DataLoader(
-        test_dataset, batch_size=bs, shuffle=False, num_workers=4
+        test_dataset,
+        batch_size=14,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True,
+        worker_init_fn=seed_worker,
+        generator=g,
     )
 
     myModel = get_pretrained_model(hyper_params, num_classes=n_classes)
@@ -137,6 +152,7 @@ def run_train(
 
     # Repeat for each epoch
     min_valid_loss = math.inf
+    max_f1_macro = 0
 
     # Poor mans early stopping, abort training if validation loss does not
     # improve for x successive epochs where x is 10% of total epochs
@@ -146,149 +162,81 @@ def run_train(
     engine = Engine(myModel, optimizer, scheduler, loss_fn, device)
 
     for epoch in range(epochs):
-
-        model_path = f"{seed}-best-model-parameters.pt"
         train_loss = engine.train_one_epoch(train_dl)
-
         valid_loss, val_targs, val_preds = engine.validate_one_epoch(valid_dl)
-
         valid_metrics = Metrics(val_targs, val_preds, labels=labels).get_metrics_dict(
             prefix="val"
         )
         test_loss, test_targs, test_preds = engine.validate_one_epoch(test_dl)
-
         test_metrics = Metrics(test_targs, test_preds, labels=labels).get_metrics_dict(
             prefix="test"
         )
 
-        if neptune_logger is not None:
-            neptune_logger[f"train/loss"].log(train_loss)
-            neptune_logger[f"valid/loss"].log(valid_loss)
-            neptune_logger[f"test/loss"].log(test_loss)
-
-            for k, v in valid_metrics.items():
-                neptune_logger[f"valid/{k}"].log(v)
-
-            for k, v in test_metrics.items():
-                neptune_logger[f"test/{k}"].log(v)
-
-        logging.info(
-            f"Epoch: {epoch} ,Training Loss: {train_loss}, Validation Loss: {valid_loss} \nValid F1: {valid_metrics['val_macro avg_f1-score']} Test F1: {test_metrics['test_macro avg_f1-score']}"
+        logging.debug(
+            f"Seed: {seed} ,Training Loss: {train_loss}, Validation Loss: {valid_loss}"
         )
         if valid_loss < min_valid_loss:
             min_valid_loss = valid_loss
-            min_test_loss = test_loss
-            max_valid_f1 = valid_metrics["val_macro avg_f1-score"]
-            max_test_f1 = test_metrics["test_macro avg_f1-score"]
+            best_valid = valid_metrics
+            best_test = test_metrics
             if save_model:
-                logging.info("Saving model.....")
-                torch.save(myModel.state_dict(), model_path)
-                if neptune_logger is not None:
-                    neptune_logger[f"best_model_params_{seed}"].track_files(model_path)
+                logging.debug("Saving model.....")
+                torch.save(myModel.state_dict(), f"best_model_params_{seed}.pt")
+
         else:
             early_stopping_counter += 1
         if early_stopping_counter > early_stopping_iter:
-            logging.info(f"Early stopping after {early_stopping_counter} iterations")
+            logging.debug(f"Early stopping after {early_stopping_counter} iterations")
             break
 
-    return min_valid_loss, max_valid_f1, max_test_f1
+    return best_valid, best_test
 
 
-def objective(trial):
-    # Objective function for optuna to minimize
+def train_one_model(
+    data_params=data_params,
+    best_params=best_params,
+    wav_params=wav_aug_combos,
+    spec_params=spec_aug_combos,
+    save_model=True,
+):
 
-    hyper_params = {
-        "pretrained_model": trial.suggest_categorical(
-            "pretrained_model", ["resnext50_32x4d", "resnet50", "efficientnet-b3"]
-        ),
-        "wav_augs": trial.suggest_categorical("wav_augs", list(wav_aug_combos.keys())),
-        "spec_augs": trial.suggest_categorical(
-            "spec_augs", list(spec_aug_combos.keys())
-        ),
-        "wav_augs_eval": trial.suggest_categorical(
-            "wav_augs_eval", list(wav_aug_combos.keys())
-        ),
-        "spec_augs_eval": trial.suggest_categorical(
-            "spec_augs_eval", list(spec_aug_combos.keys())
-        ),
-        "num_layers": trial.suggest_int(
-            "num_layer", 0, 7
-        ),  # additional layers after pretrained models
-        "hidden_size": trial.suggest_int("hidden_size", 16, 2048),
-        "dropout": trial.suggest_uniform("dropout", 0.1, 0.7),
-        "learning_rate": trial.suggest_loguniform("learning_rate", 1e-6, 1e-2),
-        # "target": data_params["STRATIFY_COL"],
-        "epochs": 50,
-        "batch_size": 12,
-    }
+    logging.info("Experiment start ========")
+    logging.info(f"Params:\n{best_params}")
+    for seed in range(100, 400, 100):
+        data_params["SEED"] = seed
+        data_params["TRAIN_TEST_SPLIT_SEED"] = seed
 
-    with log_neptune() as run:
-        run["parameters"] = hyper_params
-        run["mode"] = "search"
-        min_valid_loss, max_valid_f1, max_test_f1 = run_train(
-            data_params=data_params,
-            hyper_params=hyper_params,
-            wav_aug_combos=wav_aug_combos,
-            spec_aug_combos=spec_aug_combos,
-            save_model=False,
-            neptune_logger=run,
+        # Create train/test split files
+        TestSplitter(data_params).get_no_leakage_trainval_test_splits()
+
+        val_metrics, test_metrics = run_train(
+            data_params, best_params, wav_params, spec_params, save_model=save_model
         )
 
-        run["eval/min_loss"] = min_valid_loss
-        run["eval/max_f1"] = max_valid_f1
-        run["test/max_f1"] = max_test_f1
-
-    return min_valid_loss
+        logging.info(
+            f"Seed: {seed}, val_metrics:\n{val_metrics}\n, \nTest Metrics \n{test_metrics}"
+        )
+    logging.info("Experiment End ========")
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--mode",
-        choices=["search", "train"],
-        default="search",
-        help="Specify if hyperparameter search should be run, or best_param model should be trained.",
-    )
+    logging.basicConfig(filename="best_model.log", level=logging.INFO)
 
-    args = parser.parse_args()
+    # Experiment 1, best model
+    train_one_model(save_model=True)
 
-    if args.mode == "search":
-        # Creating one model per seed and tuning it
-        for seed in range(100, 400, 100):
-            data_params["SEED"] = seed
-            data_params["TRAIN_TEST_SPLIT_SEED"] = seed
+    """
+    # Experiment 2, 
+    for wav in wav_aug_combos:
+        #if wav != best_params["wav_augs"]:
+        params = best_params
+        params["wav_augs"] = wav
+        train_one_model(save_model=False, best_params=params)
 
-            # Create train/test split files
-            TestSplitter(data_params).get_no_leakage_trainval_test_splits()
+    for spec in spec_aug_combos:
+        #if spec != best_params["spec_augs"]:
+        params = best_params
+        params["spec_augs"] = spec
+        train_one_model(save_model=False, best_params=params)
 
-            logging.debug("Hyperparameter search mode")
-            # Objective function is to minimize minimum validation loss
-            study = optuna.create_study(direction="minimize")
-            study.optimize(objective, n_trials=100)
-
-            # Print and save parameters of best model
-            trial_ = study.best_trial
-            logging.info(f"Best trial values: {trial_.values}")
-            logging.info(f"Best trial values: {trial_.params}")
-            p = trial_.params
-    else:
-        logging.debug("Training best model from best_params in .config.py")
-        logging.debug(f"Using parameters: {best_params}")
-        p = best_params
-
-        with log_neptune() as run:
-            run["parameters"] = best_params
-            run["mode"] = "train"
-            min_valid_loss, max_valid_f1, max_test_f1 = run_train(
-                data_params=data_params,
-                hyper_params=best_params,
-                wav_aug_combos=wav_aug_combos,
-                spec_aug_combos=spec_aug_combos,
-                save_model=True,
-                neptune_logger=run,
-            )
-
-            run["eval/min_loss"] = min_valid_loss
-            run["eval/max_f1"] = max_valid_f1
-            run["test/max_f1"] = max_test_f1
+    """
